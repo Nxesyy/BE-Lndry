@@ -1,26 +1,81 @@
-import { Injectable } from '@nestjs/common';
-import { CreateAdminDto } from './dto/create-admin.dto';
-import { UpdateAdminDto } from './dto/update-admin.dto';
+import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class AdminService {
-  create(createAdminDto: CreateAdminDto) {
-    return 'This action adds a new admin';
+  constructor(private readonly prisma: PrismaService) {}
+
+  async getAllUsers() {
+    try {
+      const users = await this.prisma.user.findMany({
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          role: true,
+          createdAt: true,
+        }
+      });
+      return {
+        message: 'Users retrieved successfully',
+        data: users
+      };
+    } catch (error) {
+      throw new InternalServerErrorException('Failed to retrieve users');
+    }
   }
 
-  findAll() {
-    return `This action returns all admin`;
+  async getAllOrders() {
+    try {
+      const orders = await this.prisma.order.findMany({
+        include: {
+          user: { select: { id: true, name: true, email: true } }
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+      return {
+        message: 'Orders retrieved successfully',
+        data: orders
+      };
+    } catch (error) {
+      throw new InternalServerErrorException('Failed to retrieve orders');
+    }
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} admin`;
+  async updateOrderStatus(id: number, status: any) {
+    try {
+      const order = await this.prisma.order.findUnique({ where: { id } });
+      if (!order) throw new NotFoundException(`Order with ID ${id} not found`);
+
+      const updatedOrder = await this.prisma.order.update({
+        where: { id },
+        data: { status }
+      });
+
+      return {
+        message: 'Order status updated successfully',
+        data: updatedOrder
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException('Failed to update order status');
+    }
   }
 
-  update(id: number, updateAdminDto: UpdateAdminDto) {
-    return `This action updates a #${id} admin`;
-  }
+  async deleteUser(id: number) {
+    try {
+      const user = await this.prisma.user.findUnique({ where: { id } });
+      if (!user) throw new NotFoundException(`User with ID ${id} not found`);
 
-  remove(id: number) {
-    return `This action removes a #${id} admin`;
+      await this.prisma.user.delete({ where: { id } });
+
+      return {
+        message: `User ${id} deleted successfully`
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      throw new InternalServerErrorException('Failed to delete user');
+    }
   }
 }

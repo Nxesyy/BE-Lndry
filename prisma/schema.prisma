@@ -26,42 +26,90 @@ enum LaundryStatus {
   DIAMBIL
 }
 
+enum PaymentStatus {
+  UNPAID
+  PENDING
+  PAID
+  REJECTED
+}
+
 model User {
-  id          Int      @id @default(autoincrement())
+  id          Int       @id @default(autoincrement())
+
   name        String
-  email       String   @unique
-  phone       String
+  email       String    @unique
   password    String
-  role        Role     @default(CUSTOMER)
+
+  role        Role      @default(CUSTOMER)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   orders      Order[]
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
 }
 
 model Order {
-  id              Int             @id @default(autoincrement())
+  id              Int              @id @default(autoincrement())
 
-  invoiceCode     String          @unique
+  orderCode       String           @unique
 
   userId          Int
-  user            User            @relation(fields: [userId], references: [id])
+  customer        User             @relation(
+    fields: [userId],
+    references: [id]
+  )
 
   weight          Float
-  serviceType     String
-
-  pricePerKg      Int
   totalPrice      Int
 
-  status          LaundryStatus   @default(DIPROSES)
+  status          LaundryStatus    @default(DIPROSES)
 
-  estimatedFinish DateTime
   finishedAt      DateTime?
 
-  isFinishedNotif Boolean         @default(false)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  histories       OrderHistory[]
+
+  transaction     Transaction?
 }
 
+model OrderHistory {
+  id            Int              @id @default(autoincrement())
+
+  orderId       Int
+  order         Order            @relation(
+    fields: [orderId],
+    references: [id]
+  )
+
+  status        LaundryStatus
+
+  createdAt     DateTime         @default(now())
+}
+
+model Transaction {
+  id                Int               @id @default(autoincrement())
+
+  transactionCode   String            @unique
+
+  amount            Int
+
+  paymentStatus     PaymentStatus     @default(UNPAID)
+
+  paymentMethod     String
+
+  paymentProof      String?
+
+  paidAt            DateTime?
+
+  orderId           Int               @unique
+
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  order             Order             @relation(
+    fields: [orderId],
+    references: [id]
+  )
+}
