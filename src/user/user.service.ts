@@ -1,147 +1,117 @@
-import { ConflictException, Injectable, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UserService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(createUserDto: CreateUserDto) {
-    try {
-      const { name, email, password, phone } = createUserDto;
-
-      const existingUser = await this.prisma.user.findUnique({
-        where: { email }
-      });
-
-      if (existingUser) {
-        throw new ConflictException("Email already exists/in use");
-      }
-
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      const user = await this.prisma.user.create({
-        data: {
-          name,
-          email,
-          password: hashedPassword,
-          phone
-        }
-      });
-
-      return {
-        message: 'User created successfully',
-        data: user
-      };
-    } catch (error) {
-      if (error instanceof ConflictException) {
-        throw error;
-      }
-      throw new InternalServerErrorException(error.message || 'Something went wrong while creating user');
-    }
-  }
-
   async findAll() {
-    try {
-      const users = await this.prisma.user.findMany();
-      return {
-        message: 'Users retrieved successfully',
-        data: users
-      };
-    } catch (error) {
-      throw new InternalServerErrorException('Failed to retrieve users');
-    }
+    const users = await this.prisma.user.findMany({
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      message: 'Data user berhasil diambil',
+      data: users,
+    };
   }
 
   async findOne(id: number) {
-    try {
-      const user = await this.prisma.user.findUnique({
-        where: { id }
-      });
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true,
+        orders: {
+          select: {
+            id: true,
+            orderCode: true,
+            status: true,
+            totalPrice: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
 
-      if (!user) {
-        throw new NotFoundException(`User with ID ${id} not found`);
-      }
-
-      return {
-        message: 'User retrieved successfully',
-        data: user
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-      throw new InternalServerErrorException('Failed to retrieve user');
+    if (!user) {
+      throw new NotFoundException(`User dengan ID ${id} tidak ditemukan`);
     }
+
+    return {
+      message: 'Data user berhasil diambil',
+      data: user,
+    };
   }
 
   async update(id: number, updateUserDto: UpdateUserDto) {
-    try {
-      const { password, ...otherData } = updateUserDto;
-      
-      const userExists = await this.prisma.user.findUnique({
-        where: { id }
-      });
-
-      if (!userExists) {
-        throw new NotFoundException(`User with ID ${id} not found`);
-      }
-
-      if (otherData.email) {
-        const emailExists = await this.prisma.user.findUnique({
-          where: { email: otherData.email }
-        });
-        if (emailExists && emailExists.id !== id) {
-          throw new ConflictException('Email is already in use by another user');
-        }
-      }
-
-      const dataToUpdate: any = { ...otherData };
-      if (password) {
-        dataToUpdate.password = await bcrypt.hash(password, 10);
-      }
-
-      const updatedUser = await this.prisma.user.update({
-        where: { id },
-        data: dataToUpdate
-      });
-
-      return {
-        message: 'User updated successfully',
-        data: updatedUser
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException || error instanceof ConflictException) {
-        throw error;
-      }
-      throw new InternalServerErrorException('Failed to update user');
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException(`User dengan ID ${id} tidak ditemukan`);
     }
+
+    if (updateUserDto.email && updateUserDto.email !== user.email) {
+      const emailExists = await this.prisma.user.findUnique({
+        where: { email: updateUserDto.email },
+      });
+      if (emailExists) {
+        throw new ConflictException('Email sudah digunakan oleh user lain');
+      }
+    }
+
+    const dataToUpdate: any = { ...updateUserDto };
+    if (updateUserDto.password) {
+      dataToUpdate.password = await bcrypt.hash(updateUserDto.password, 10);
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id },
+      data: dataToUpdate,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      message: 'User berhasil diupdate',
+      data: updatedUser,
+    };
   }
 
   async remove(id: number) {
-    try {
-      const userExists = await this.prisma.user.findUnique({
-        where: { id }
-      });
-
-      if (!userExists) {
-        throw new NotFoundException(`User with ID ${id} not found`);
-      }
-
-      await this.prisma.user.delete({
-        where: { id }
-      });
-
-      return {
-        message: 'User deleted successfully'
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-      throw new InternalServerErrorException('Failed to delete user');
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException(`User dengan ID ${id} tidak ditemukan`);
     }
+
+    if (user.role === 'ROOT') {
+      throw new BadRequestException('Akun ROOT (Owner) tidak dapat dihapus');
+    }
+
+    await this.prisma.user.delete({ where: { id } });
+
+    return {
+      message: 'User berhasil dihapus',
+      data: null,
+    };
   }
 }

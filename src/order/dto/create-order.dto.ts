@@ -1,23 +1,19 @@
-import { IsNotEmpty, IsNumber, IsString, IsDateString } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsString } from 'class-validator';
 
 export class CreateOrderDto {
-  @IsNotEmpty()
-  @IsNumber()
+  @IsNotEmpty({ message: 'User ID wajib diisi' })
+  @IsNumber({}, { message: 'User ID harus berupa angka' })
   userId: number;
 
-  @IsNotEmpty()
-  @IsNumber()
+  @IsNotEmpty({ message: 'Berat (kg) wajib diisi' })
+  @IsNumber({}, { message: 'Berat harus berupa angka' })
   weight: number;
 
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Total harga wajib diisi' })
+  @IsNumber({}, { message: 'Total harga harus berupa angka' })
+  totalPrice: number;
+
+  @IsNotEmpty({ message: 'Metode pembayaran wajib diisi' })
   @IsString()
-  serviceType: string;
-
-  @IsNotEmpty()
-  @IsNumber()
-  pricePerKg: number;
-
-  @IsNotEmpty()
-  @IsDateString()
-  estimatedFinish: string;
+  paymentMethod: string;
 }

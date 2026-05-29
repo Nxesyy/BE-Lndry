@@ -1,34 +1,50 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Controller, Get, Patch, Param, UseGuards, Query, ParseIntPipe, UseInterceptors, UploadedFile, BadRequestException, Post } from '@nestjs/common';
 import { TransactionService } from './transaction.service';
-import { CreateTransactionDto } from './dto/create-transaction.dto';
-import { UpdateTransactionDto } from './dto/update-transaction.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { multerConfig } from '../common/utils/multer.config';
 
-@Controller('transaction')
+@UseGuards(JwtAuthGuard)
+@Controller('transactions')
 export class TransactionController {
   constructor(private readonly transactionService: TransactionService) {}
 
-  @Post()
-  create(@Body() createTransactionDto: CreateTransactionDto) {
-    return this.transactionService.create(createTransactionDto);
-  }
-
   @Get()
-  findAll() {
-    return this.transactionService.findAll();
+  findAll(@Query() query: any) {
+    return this.transactionService.findAll(query);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.transactionService.findOne(+id);
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.transactionService.findOne(id);
   }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateTransactionDto: UpdateTransactionDto) {
-    return this.transactionService.update(+id, updateTransactionDto);
+  @Post(':id/upload-proof')
+  @UseInterceptors(FileInterceptor('file', multerConfig))
+  uploadProof(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('File gambar wajib diupload');
+    }
+    const filePath = `/uploads/${file.filename}`;
+    return this.transactionService.uploadProof(id, filePath);
   }
 
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.transactionService.remove(+id);
+  @Patch(':id/approve')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  approve(@Param('id', ParseIntPipe) id: number) {
+    return this.transactionService.approve(id);
+  }
+
+  @Patch(':id/reject')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  reject(@Param('id', ParseIntPipe) id: number) {
+    return this.transactionService.reject(id);
   }
 }

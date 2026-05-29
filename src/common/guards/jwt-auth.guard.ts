@@ -7,9 +7,9 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     return super.canActivate(context);
   }
 
-  handleRequest(err: any, user: any, info: any) {
+  handleRequest(err: any, user: any) {
     if (err || !user) {
-      throw err || new UnauthorizedException('You must be logged in to access this resource');
+      throw err || new UnauthorizedException('Anda harus login untuk mengakses resource ini');
     }
     return user;
   }

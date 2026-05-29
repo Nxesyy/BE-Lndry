@@ -1,127 +1,216 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
-import { CreateOrderDto } from './dto/create-order.dto';
-import { UpdateOrderDto } from './dto/update-order.dto';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateOrderDto } from './dto/create-order.dto';
+import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import { LaundryStatus, PaymentStatus } from '@prisma/client';
+import { generateOrderCode, generateTransactionCode } from '../common/utils/code-generator';
 
 @Injectable()
 export class OrderService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) {}
+
+  private readonly statusSequence: LaundryStatus[] = [
+    LaundryStatus.DIPROSES,
+    LaundryStatus.DICUCI,
+    LaundryStatus.DISETRIKA,
+    LaundryStatus.SELESAI,
+    LaundryStatus.DIAMBIL,
+  ];
 
   async create(createOrderDto: CreateOrderDto) {
-    try {
-      const { userId, weight, serviceType, pricePerKg, estimatedFinish } = createOrderDto;
-      
-      const totalPrice = weight * pricePerKg;
-      
-      const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const invoiceCode = `INV-${dateStr}-${randomStr}`;
+    const { userId, weight, totalPrice, paymentMethod } = createOrderDto;
 
-      const order = await this.prisma.order.create({
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException(`User dengan ID ${userId} tidak ditemukan`);
+    }
+
+    const orderCode = generateOrderCode();
+    const transactionCode = generateTransactionCode();
+
+    // Use Prisma $transaction
+    const result = await this.prisma.$transaction(async (prisma) => {
+      // 1. Create Order
+      const order = await prisma.order.create({
         data: {
-          invoiceCode,
+          orderCode,
           userId,
           weight,
-          serviceType,
-          pricePerKg,
           totalPrice,
-          estimatedFinish: new Date(estimatedFinish),
-          status: 'DIPROSES',
-        }
+          status: LaundryStatus.DIPROSES,
+        },
       });
 
-      return {
-        message: 'Order created successfully',
-        data: order
-      };
-    } catch (error) {
-      throw new InternalServerErrorException('Failed to create order');
-    }
+      // 2. Create Transaction
+      await prisma.transaction.create({
+        data: {
+          transactionCode,
+          orderId: order.id,
+          amount: totalPrice,
+          paymentMethod,
+          paymentStatus: PaymentStatus.UNPAID,
+        },
+      });
+
+      // 3. Create Order History
+      await prisma.orderHistory.create({
+        data: {
+          orderId: order.id,
+          status: LaundryStatus.DIPROSES,
+        },
+      });
+
+      return order;
+    });
+
+    return {
+      message: 'Order berhasil dibuat',
+      data: result,
+    };
   }
 
-  async findAll() {
-    try {
-      const orders = await this.prisma.order.findMany({
-        include: { user: { select: { id: true, name: true, email: true } } }
-      });
-      return {
-        message: 'Orders retrieved successfully',
-        data: orders
-      };
-    } catch (error) {
-      throw new InternalServerErrorException('Failed to retrieve orders');
+  async findAll(query: any) {
+    const { page = 1, limit = 10, search, status } = query;
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (search) {
+      where.orderCode = { contains: search };
     }
+    if (status) {
+      where.status = status;
+    }
+
+    const [orders, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        skip: Number(skip),
+        take: Number(limit),
+        include: {
+          customer: { select: { id: true, name: true, email: true } },
+          transaction: true,
+          histories: { orderBy: { createdAt: 'desc' } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+
+    return {
+      message: 'Data order berhasil diambil',
+      data: {
+        orders,
+        meta: {
+          total,
+          page: Number(page),
+          lastPage: Math.ceil(total / limit),
+        },
+      },
+    };
   }
 
   async findOne(id: number) {
-    try {
-      const order = await this.prisma.order.findUnique({
-        where: { id },
-        include: { user: { select: { id: true, name: true, email: true } } }
-      });
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: {
+        customer: { select: { id: true, name: true, email: true } },
+        transaction: true,
+        histories: { orderBy: { createdAt: 'desc' } },
+      },
+    });
 
-      if (!order) {
-        throw new NotFoundException(`Order with ID ${id} not found`);
-      }
-
-      return {
-        message: 'Order retrieved successfully',
-        data: order
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException) throw error;
-      throw new InternalServerErrorException('Failed to retrieve order');
+    if (!order) {
+      throw new NotFoundException(`Order dengan ID ${id} tidak ditemukan`);
     }
+
+    return {
+      message: 'Data order berhasil diambil',
+      data: order,
+    };
   }
 
-  async update(id: number, updateOrderDto: UpdateOrderDto) {
-    try {
-      const orderExists = await this.prisma.order.findUnique({ where: { id } });
-      if (!orderExists) {
-        throw new NotFoundException(`Order with ID ${id} not found`);
-      }
+  async updateStatus(id: number, updateOrderStatusDto: UpdateOrderStatusDto) {
+    const { status: newStatus } = updateOrderStatusDto;
 
-      const dataToUpdate: any = { ...updateOrderDto };
-      if (updateOrderDto.estimatedFinish) {
-        dataToUpdate.estimatedFinish = new Date(updateOrderDto.estimatedFinish);
-      }
+    const order = await this.prisma.order.findUnique({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Order dengan ID ${id} tidak ditemukan`);
+    }
+
+    const currentStatusIndex = this.statusSequence.indexOf(order.status);
+    const newStatusIndex = this.statusSequence.indexOf(newStatus);
+
+    // Validasi urutan status tidak boleh loncat
+    if (newStatusIndex !== currentStatusIndex + 1 && newStatusIndex !== currentStatusIndex) {
+      throw new BadRequestException(
+        `Update status tidak valid. Status saat ini: ${order.status}, tidak bisa loncat ke ${newStatus}`
+      );
+    }
+
+    if (currentStatusIndex === newStatusIndex) {
+       return { message: 'Status order sudah berada pada tahap tersebut', data: order };
+    }
+
+    const result = await this.prisma.$transaction(async (prisma) => {
+      let dataToUpdate: any = { status: newStatus };
       
-      if (updateOrderDto.weight || updateOrderDto.pricePerKg) {
-        const newWeight = updateOrderDto.weight ?? orderExists.weight;
-        const newPricePerKg = updateOrderDto.pricePerKg ?? orderExists.pricePerKg;
-        dataToUpdate.totalPrice = newWeight * newPricePerKg;
+      if (newStatus === LaundryStatus.SELESAI) {
+        dataToUpdate.finishedAt = new Date();
       }
 
-      const updatedOrder = await this.prisma.order.update({
+      const updatedOrder = await prisma.order.update({
         where: { id },
-        data: dataToUpdate
+        data: dataToUpdate,
       });
 
-      return {
-        message: 'Order updated successfully',
-        data: updatedOrder
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException) throw error;
-      throw new InternalServerErrorException('Failed to update order');
-    }
+      await prisma.orderHistory.create({
+        data: {
+          orderId: id,
+          status: newStatus,
+        },
+      });
+
+      return updatedOrder;
+    });
+
+    return {
+      message: `Status order berhasil diupdate menjadi ${newStatus}`,
+      data: result,
+    };
   }
 
   async remove(id: number) {
-    try {
-      const orderExists = await this.prisma.order.findUnique({ where: { id } });
-      if (!orderExists) {
-        throw new NotFoundException(`Order with ID ${id} not found`);
-      }
-
-      await this.prisma.order.delete({ where: { id } });
-
-      return {
-        message: 'Order deleted successfully'
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException) throw error;
-      throw new InternalServerErrorException('Failed to delete order');
+    const order = await this.prisma.order.findUnique({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Order dengan ID ${id} tidak ditemukan`);
     }
+
+    await this.prisma.$transaction(async (prisma) => {
+      await prisma.orderHistory.deleteMany({ where: { orderId: id } });
+      await prisma.transaction.deleteMany({ where: { orderId: id } });
+      await prisma.order.delete({ where: { id } });
+    });
+
+    return {
+      message: 'Order berhasil dihapus',
+      data: null,
+    };
+  }
+
+  async getHistory(id: number) {
+    const order = await this.prisma.order.findUnique({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Order dengan ID ${id} tidak ditemukan`);
+    }
+
+    const histories = await this.prisma.orderHistory.findMany({
+      where: { orderId: id },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return {
+      message: 'History order berhasil diambil',
+      data: histories,
+    };
   }
 }

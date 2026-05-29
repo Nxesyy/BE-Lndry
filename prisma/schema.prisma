@@ -16,6 +16,7 @@ datasource db {
 enum Role {
   ADMIN
   CUSTOMER
+  ROOT
 }
 
 enum LaundryStatus {
@@ -54,10 +55,7 @@ model Order {
   orderCode       String           @unique
 
   userId          Int
-  customer        User             @relation(
-    fields: [userId],
-    references: [id]
-  )
+  customer        User             @relation(fields: [userId], references: [id])
 
   weight          Float
   totalPrice      Int
@@ -78,10 +76,7 @@ model OrderHistory {
   id            Int              @id @default(autoincrement())
 
   orderId       Int
-  order         Order            @relation(
-    fields: [orderId],
-    references: [id]
-  )
+  order         Order            @relation(fields: [orderId], references: [id])
 
   status        LaundryStatus
 
@@ -108,8 +103,5 @@ model Transaction {
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 
-  order             Order             @relation(
-    fields: [orderId],
-    references: [id]
-  )
+  order             Order             @relation(fields: [orderId], references: [id])
 }

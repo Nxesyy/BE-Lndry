@@ -3,25 +3,21 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { JWTStrategy } from '../helper/jwt-strategy';
-import { BcryptModule } from '../bcrypt/bcrypt.module';
-import { PrismaModule } from '../prisma/prisma.module';
+import { JwtStrategy } from './jwt.strategy';
 
 @Module({
   imports: [
-    PrismaModule,
-    BcryptModule,
-    ConfigModule.forRoot(), // Load env variables
+    ConfigModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: async (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET') || 'secret-word',
+      useFactory: (configService: ConfigService) => ({
+        secret: configService.get<string>('JWT_SECRET') || 'laundry-secret-key-2026',
         signOptions: { expiresIn: '1d' },
       }),
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JWTStrategy],
+  providers: [AuthService, JwtStrategy],
 })
 export class AuthModule {}

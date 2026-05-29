@@ -1,34 +1,39 @@
-import { Controller, Get, Patch, Param, Delete, UseGuards, Body } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, ParseIntPipe } from '@nestjs/common';
 import { AdminService } from './admin.service';
-import { JwtAuthGuard } from '../helper/jwt-auth.guard';
-import { RoleGuard, Roles } from '../helper/role-guard';
+import { CreateAdminDto } from './dto/create-admin.dto';
+import { UpdateAdminDto } from './dto/update-admin.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 
-@UseGuards(JwtAuthGuard, RoleGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN')
-@Controller('admin')
+@Controller('admins') // ubah path menjadi /admins (karena /admin biasanya dashboard, untuk amannya pakai admins)
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
-  @Get('users')
-  getAllUsers() {
-    return this.adminService.getAllUsers();
+  @Post()
+  create(@Body() createAdminDto: CreateAdminDto) {
+    return this.adminService.create(createAdminDto);
   }
 
-  @Get('orders')
-  getAllOrders() {
-    return this.adminService.getAllOrders();
+  @Get()
+  findAll() {
+    return this.adminService.findAll();
   }
 
-  @Patch('orders/:id/status')
-  updateOrderStatus(
-    @Param('id') id: string,
-    @Body('status') status: any
-  ) {
-    return this.adminService.updateOrderStatus(+id, status);
+  @Get(':id')
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.findOne(id);
   }
 
-  @Delete('users/:id')
-  deleteUser(@Param('id') id: string) {
-    return this.adminService.deleteUser(+id);
+  @Patch(':id')
+  update(@Param('id', ParseIntPipe) id: number, @Body() updateAdminDto: UpdateAdminDto) {
+    return this.adminService.update(id, updateAdminDto);
+  }
+
+  @Delete(':id')
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.remove(id);
   }
 }

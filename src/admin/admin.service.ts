@@ -1,81 +1,111 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateAdminDto } from './dto/create-admin.dto';
+import { UpdateAdminDto } from './dto/update-admin.dto';
+import * as bcrypt from 'bcrypt';
+import { Role } from '@prisma/client';
 
 @Injectable()
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getAllUsers() {
-    try {
-      const users = await this.prisma.user.findMany({
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          phone: true,
-          role: true,
-          createdAt: true,
-        }
-      });
-      return {
-        message: 'Users retrieved successfully',
-        data: users
-      };
-    } catch (error) {
-      throw new InternalServerErrorException('Failed to retrieve users');
+  async create(createAdminDto: CreateAdminDto) {
+    const { name, email, password } = createAdminDto;
+
+    const emailExists = await this.prisma.user.findUnique({ where: { email } });
+    if (emailExists) {
+      throw new ConflictException('Email sudah digunakan');
     }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const admin = await this.prisma.user.create({
+      data: {
+        name,
+        email,
+        password: hashedPassword,
+        role: Role.ADMIN, // Force role ADMIN
+      },
+      select: { id: true, name: true, email: true, role: true, createdAt: true },
+    });
+
+    return {
+      message: 'Admin berhasil ditambahkan',
+      data: admin,
+    };
   }
 
-  async getAllOrders() {
-    try {
-      const orders = await this.prisma.order.findMany({
-        include: {
-          user: { select: { id: true, name: true, email: true } }
-        },
-        orderBy: { createdAt: 'desc' }
-      });
-      return {
-        message: 'Orders retrieved successfully',
-        data: orders
-      };
-    } catch (error) {
-      throw new InternalServerErrorException('Failed to retrieve orders');
-    }
+  async findAll() {
+    const admins = await this.prisma.user.findMany({
+      where: { role: Role.ADMIN },
+      select: { id: true, name: true, email: true, role: true, createdAt: true },
+    });
+
+    return {
+      message: 'Data admin berhasil diambil',
+      data: admins,
+    };
   }
 
-  async updateOrderStatus(id: number, status: any) {
-    try {
-      const order = await this.prisma.order.findUnique({ where: { id } });
-      if (!order) throw new NotFoundException(`Order with ID ${id} not found`);
+  async findOne(id: number) {
+    const admin = await this.prisma.user.findFirst({
+      where: { id, role: Role.ADMIN },
+      select: { id: true, name: true, email: true, role: true, createdAt: true },
+    });
 
-      const updatedOrder = await this.prisma.order.update({
-        where: { id },
-        data: { status }
-      });
-
-      return {
-        message: 'Order status updated successfully',
-        data: updatedOrder
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException) throw error;
-      throw new InternalServerErrorException('Failed to update order status');
+    if (!admin) {
+      throw new NotFoundException(`Admin dengan ID ${id} tidak ditemukan`);
     }
+
+    return {
+      message: 'Data admin berhasil diambil',
+      data: admin,
+    };
   }
 
-  async deleteUser(id: number) {
-    try {
-      const user = await this.prisma.user.findUnique({ where: { id } });
-      if (!user) throw new NotFoundException(`User with ID ${id} not found`);
-
-      await this.prisma.user.delete({ where: { id } });
-
-      return {
-        message: `User ${id} deleted successfully`
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException) throw error;
-      throw new InternalServerErrorException('Failed to delete user');
+  async update(id: number, updateAdminDto: UpdateAdminDto) {
+    const admin = await this.prisma.user.findFirst({ where: { id, role: Role.ADMIN } });
+    if (!admin) {
+      throw new NotFoundException(`Admin dengan ID ${id} tidak ditemukan`);
     }
+
+    if (updateAdminDto.email && updateAdminDto.email !== admin.email) {
+      const emailExists = await this.prisma.user.findUnique({
+        where: { email: updateAdminDto.email },
+      });
+      if (emailExists) {
+        throw new ConflictException('Email sudah digunakan oleh user lain');
+      }
+    }
+
+    const dataToUpdate: any = { ...updateAdminDto };
+    if (updateAdminDto.password) {
+      dataToUpdate.password = await bcrypt.hash(updateAdminDto.password, 10);
+    }
+
+    const updatedAdmin = await this.prisma.user.update({
+      where: { id },
+      data: dataToUpdate,
+      select: { id: true, name: true, email: true, role: true, updatedAt: true },
+    });
+
+    return {
+      message: 'Data admin berhasil diupdate',
+      data: updatedAdmin,
+    };
+  }
+
+  async remove(id: number) {
+    const admin = await this.prisma.user.findFirst({ where: { id, role: Role.ADMIN } });
+    if (!admin) {
+      throw new NotFoundException(`Admin dengan ID ${id} tidak ditemukan`);
+    }
+
+    await this.prisma.user.delete({ where: { id } });
+
+    return {
+      message: 'Admin berhasil dihapus',
+      data: null,
+    };
   }
 }
